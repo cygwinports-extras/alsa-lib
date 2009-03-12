@@ -1,0 +1,524 @@
+--- origsrc/alsa-lib-1.0.19/alsalisp/Makefile.am	2009-01-19 05:17:18.000000000 -0600
++++ src/alsa-lib-1.0.19/alsalisp/Makefile.am	2009-03-08 21:48:17.515625000 -0500
+@@ -3,6 +3,6 @@ noinst_PROGRAMS = alsalisp
+ alsalisp_SOURCES = alsalisp.c
+ alsalisp_LDADD = ../src/libasound.la
+ 
+-all: alsalisp
++all: alsalisp$(EXEEXT)
+ 
+ INCLUDES=-I$(top_srcdir)/include -I$(top_srcdir)/src/alisp
+--- origsrc/alsa-lib-1.0.19/aserver/Makefile.am	2009-01-19 05:17:18.000000000 -0600
++++ src/alsa-lib-1.0.19/aserver/Makefile.am	2009-03-08 21:46:54.937500000 -0500
+@@ -3,7 +3,7 @@ aserver_SOURCES = aserver.c
+ # aserver_LDADD = -lasound
+ aserver_LDADD = ../src/libasound.la
+ 
+-all: aserver
++all: aserver$(EXEEXT)
+ 
+ INCLUDES=-I$(top_srcdir)/include -I$(top_srcdir)/src/pcm
+ 
+--- origsrc/alsa-lib-1.0.19/aserver/aserver.c	2009-01-19 05:17:18.000000000 -0600
++++ src/alsa-lib-1.0.19/aserver/aserver.c	2009-03-08 21:47:58.515625000 -0500
+@@ -472,7 +472,7 @@ static int pcm_shm_cmd(client_t *client)
+ 		ctrl->result = snd_pcm_rewind(pcm, ctrl->u.rewind.frames);
+ 		break;
+ 	case SND_PCM_IOCTL_FORWARD:
+-		ctrl->result = snd_pcm_forward(pcm, ctrl->u.forward.frames);
++		ctrl->result = INTERNAL(snd_pcm_forward)(pcm, ctrl->u.forward.frames);
+ 		break;
+ 	case SNDRV_PCM_IOCTL_LINK:
+ 	{
+--- origsrc/alsa-lib-1.0.19/include/alsa-symbols.h	2009-01-19 05:17:18.000000000 -0600
++++ src/alsa-lib-1.0.19/include/alsa-symbols.h	2009-03-09 00:54:05.703125000 -0500
+@@ -57,7 +57,7 @@
+ 	__asm__ (".set " ASM_NAME(#name) "," ASM_NAME(#real));		\
+ 	__asm__ (".set ." ASM_NAME(#name) ",." ASM_NAME(#real))
+ #else
+-#if defined(__alpha__) || defined(__mips__)
++#if defined(__alpha__) || defined(__mips__) || defined(__CYGWIN__)
+ #define use_default_symbol_version(real, name, version) \
+         __asm__ (".weak " ASM_NAME(#name)); \
+         __asm__ (ASM_NAME(#name) " = " ASM_NAME(#real))
+--- origsrc/alsa-lib-1.0.19/include/global.h	2009-01-19 05:17:18.000000000 -0600
++++ src/alsa-lib-1.0.19/include/global.h	2009-03-08 22:00:47.718750000 -0500
+@@ -29,7 +29,7 @@
+ #define __ALSA_GLOBAL_H_
+ 
+ /* for timeval and timespec */
+-#include <time.h>
++#include <sys/time.h>
+ 
+ #ifdef __cplusplus
+ extern "C" {
+@@ -133,7 +133,7 @@ int snd_shm_area_destroy(struct snd_shm_
+ 
+ int snd_user_file(const char *file, char **result);
+ 
+-#if !defined(_POSIX_C_SOURCE) && !defined(_POSIX_SOURCE)
++#if !defined(_POSIX_C_SOURCE) && !defined(_POSIX_SOURCE) && !defined(__CYGWIN__)
+ struct timeval {
+ 	time_t		tv_sec;		/* seconds */
+ 	long		tv_usec;	/* microseconds */
+--- origsrc/alsa-lib-1.0.19/include/local.h	2009-01-19 05:17:18.000000000 -0600
++++ src/alsa-lib-1.0.19/include/local.h	2009-03-08 21:00:21.421875000 -0500
+@@ -183,8 +183,10 @@ extern snd_lib_error_handler_t snd_err_m
+ /*
+  */
+ #define HAVE_GNU_LD
++#ifndef __CYGWIN__
+ #define HAVE_ELF
+ #define HAVE_ASM_PREVIOUS_DIRECTIVE
++#endif
+ 
+ /* Stolen from libc-symbols.h in GNU glibc */
+ 
+--- origsrc/alsa-lib-1.0.19/include/sound/asound.h	2009-01-19 05:17:18.000000000 -0600
++++ src/alsa-lib-1.0.19/include/sound/asound.h	2009-03-09 01:08:39.921875000 -0500
+@@ -59,6 +59,11 @@
+ #ifndef __KERNEL__
+ #include <sys/time.h>
+ #include <sys/types.h>
++#ifdef __CYGWIN__
++#ifndef __USE_LINUX_IOCTL_DEFS
++#define __USE_LINUX_IOCTL_DEFS
++#endif
++#endif
+ #include <sys/ioctl.h>
+ #endif
+ 
+--- origsrc/alsa-lib-1.0.19/src/Makefile.am	2009-01-19 05:17:18.000000000 -0600
++++ src/alsa-lib-1.0.19/src/Makefile.am	2009-03-09 02:05:56.000000000 -0500
+@@ -45,7 +45,7 @@ endif
+ SUBDIRS += compat conf
+ libasound_la_LIBADD += compat/libcompat.la @ALSA_DEPLIBS@
+ 
+-libasound_la_LDFLAGS = -version-info $(COMPATNUM) $(VSYMS) $(SYMFUNCS) $(LDFLAGS_NOUNDEFINED)
++libasound_la_LDFLAGS = -version-info $(COMPATNUM) $(VSYMS) $(SYMFUNCS) -no-undefined $(LDFLAGS_NOUNDEFINED)
+ 
+ control/libcontrol.la:
+ 	$(MAKE) -C control libcontrol.la
+--- origsrc/alsa-lib-1.0.19/src/alisp/alisp_snd.c	2009-01-19 05:17:18.000000000 -0600
++++ src/alsa-lib-1.0.19/src/alisp/alisp_snd.c	2009-03-08 21:46:02.812500000 -0500
+@@ -579,12 +579,12 @@ static struct alisp_object * FA_hctl_ele
+ 	p1 = add_cons(instance, p1, 1, "isowner", new_integer(instance, snd_ctl_elem_info_is_owner(info)));
+ 	p1 = add_cons(instance, p1, 1, "owner", new_integer(instance, snd_ctl_elem_info_get_owner(info)));
+ 	p1 = add_cons(instance, p1, 1, "count", new_integer(instance, snd_ctl_elem_info_get_count(info)));
+-	err = snd_ctl_elem_info_get_dimensions(info);
++	err = INTERNAL(snd_ctl_elem_info_get_dimensions)(info);
+ 	if (err > 0) {
+ 		int idx;
+ 		p1 = add_cons(instance, p1, 1, "dimensions", p2 = new_object(instance, ALISP_OBJ_CONS));
+ 		for (idx = 0; idx < err; idx++)
+-			p2 = add_cons2(instance, p2, idx > 0, new_integer(instance, snd_ctl_elem_info_get_dimension(info, idx)));
++			p2 = add_cons2(instance, p2, idx > 0, new_integer(instance, INTERNAL(snd_ctl_elem_info_get_dimension)(info, idx)));
+ 	}
+ 	switch (type) {
+ 	case SND_CTL_ELEM_TYPE_ENUMERATED: {
+--- origsrc/alsa-lib-1.0.19/src/async.c	2009-01-19 05:17:18.000000000 -0600
++++ src/alsa-lib-1.0.19/src/async.c	2009-03-08 21:21:30.656250000 -0500
+@@ -51,6 +51,8 @@ static LIST_HEAD(snd_async_handlers);
+ 
+ static void snd_async_handler(int signo ATTRIBUTE_UNUSED, siginfo_t *siginfo, void *context ATTRIBUTE_UNUSED)
+ {
++/* no si_fd member, like AIX (http://bugs.php.net/bug.php?id=45723) */
++#ifndef __CYGWIN__
+ 	int fd;
+ 	struct list_head *i;
+ 	//assert(siginfo->si_code == SI_SIGIO);
+@@ -60,6 +62,7 @@ static void snd_async_handler(int signo 
+ 		if (h->fd == fd && h->callback)
+ 			h->callback(h);
+ 	}
++#endif
+ }
+ 
+ /**
+--- origsrc/alsa-lib-1.0.19/src/control/control.c	2009-01-19 05:17:18.000000000 -0600
++++ src/alsa-lib-1.0.19/src/control/control.c	2009-03-08 21:28:39.000000000 -0500
+@@ -855,7 +855,11 @@ static int snd_ctl_open_conf(snd_ctl_t *
+ 				goto _err;
+ 			}
+ 			lib = buf1;
++#ifdef __CYGWIN__
++			sprintf(buf1, "%s/cygasound_module_ctl_%s.dll", ALSA_PLUGIN_DIR, str);
++#else
+ 			sprintf(buf1, "%s/libasound_module_ctl_%s.so", ALSA_PLUGIN_DIR, str);
++#endif
+ 		}
+ 	}
+ #ifndef PIC
+--- origsrc/alsa-lib-1.0.19/src/control/control_hw.c	2009-01-19 05:17:18.000000000 -0600
++++ src/alsa-lib-1.0.19/src/control/control_hw.c	2009-03-08 21:01:49.406250000 -0500
+@@ -88,10 +88,12 @@ static int snd_ctl_hw_async(snd_ctl_t *c
+ 		SYSERR("F_GETFL failed");
+ 		return -errno;
+ 	}
++#ifdef O_ASYNC
+ 	if (sig >= 0)
+ 		flags |= O_ASYNC;
+ 	else
+ 		flags &= ~O_ASYNC;
++#endif
+ 	if (fcntl(fd, F_SETFL, flags) < 0) {
+ 		SYSERR("F_SETFL for O_ASYNC failed");
+ 		return -errno;
+@@ -102,10 +104,12 @@ static int snd_ctl_hw_async(snd_ctl_t *c
+ 		SYSERR("F_SETSIG failed");
+ 		return -errno;
+ 	}
++#ifdef F_SETOWN
+ 	if (fcntl(fd, F_SETOWN, (long)pid) < 0) {
+ 		SYSERR("F_SETOWN failed");
+ 		return -errno;
+ 	}
++#endif
+ 	return 0;
+ }
+ 
+@@ -383,8 +387,10 @@ int snd_ctl_hw_open(snd_ctl_t **handle, 
+ 		fmode = O_RDWR;
+ 	if (mode & SND_CTL_NONBLOCK)
+ 		fmode |= O_NONBLOCK;
++#ifdef O_ASYNC
+ 	if (mode & SND_CTL_ASYNC)
+ 		fmode |= O_ASYNC;
++#endif
+ 	fd = snd_open_device(filename, fmode);
+ 	if (fd < 0) {
+ 		snd_card_load(card);
+--- origsrc/alsa-lib-1.0.19/src/control/ctl_symbols_list.c	1969-12-31 18:00:00.000000000 -0600
++++ src/alsa-lib-1.0.19/src/control/ctl_symbols_list.c	2009-03-08 20:49:05.625000000 -0500
+@@ -0,0 +1,2 @@
++&_snd_module_control_shm,
++&_snd_module_control_ext,
+--- origsrc/alsa-lib-1.0.19/src/dlmisc.c	2009-01-19 05:17:18.000000000 -0600
++++ src/alsa-lib-1.0.19/src/dlmisc.c	2009-03-09 02:05:40.171875000 -0500
+@@ -49,10 +49,10 @@ struct snd_dlsym_link *snd_dlsym_start =
+ void *snd_dlopen(const char *name, int mode)
+ {
+ #ifndef PIC
++#ifndef HAVE_LIBDL
+ 	if (name == NULL)
+ 		return &snd_dlsym_start;
+ #else
+-#ifdef HAVE_LIBDL
+ 	if (name == NULL) {
+ 		Dl_info dlinfo;
+ 		if (dladdr(snd_dlopen, &dlinfo) > 0)
+@@ -61,6 +61,11 @@ void *snd_dlopen(const char *name, int m
+ #endif
+ #endif
+ #ifdef HAVE_LIBDL
++#ifdef __CYGWIN__
++	if (name == NULL)
++		return dlopen("cygasound-2.dll", mode);
++	else
++#endif
+ 	return dlopen(name, mode);
+ #else
+ 	return NULL;
+@@ -100,7 +105,7 @@ int snd_dlclose(void *handle)
+  */
+ static int snd_dlsym_verify(void *handle, const char *name, const char *version)
+ {
+-#ifdef HAVE_LIBDL
++#if defined(HAVE_LIBDL) && defined(VERSIONED_SYMBOLS)
+ 	int res;
+ 	char *vname;
+ 	
+--- origsrc/alsa-lib-1.0.19/src/pcm/pcm.c	2009-01-19 05:17:18.000000000 -0600
++++ src/alsa-lib-1.0.19/src/pcm/pcm.c	2009-03-08 21:29:18.046875000 -0500
+@@ -2142,7 +2142,11 @@ static int snd_pcm_open_conf(snd_pcm_t *
+ 				goto _err;
+ 			}
+ 			lib = buf1;
++#ifdef __CYGWIN__
++			sprintf(buf1, "%s/cygasound_module_pcm_%s.dll", ALSA_PLUGIN_DIR, str);
++#else
+ 			sprintf(buf1, "%s/libasound_module_pcm_%s.so", ALSA_PLUGIN_DIR, str);
++#endif
+ 		}
+ 	}
+ #ifndef PIC
+@@ -2318,8 +2322,10 @@ int snd_pcm_wait(snd_pcm_t *pcm, int tim
+ 		switch (snd_pcm_state(pcm)) {
+ 		case SND_PCM_STATE_XRUN:
+ 			return -EPIPE;
++#ifdef ESTRPIPE
+ 		case SND_PCM_STATE_SUSPENDED:
+ 			return -ESTRPIPE;
++#endif
+ 		case SND_PCM_STATE_DISCONNECTED:
+ 			return -ENODEV;
+ 		default:
+@@ -2374,8 +2380,10 @@ int snd_pcm_wait_nocheck(snd_pcm_t *pcm,
+ 				switch (snd_pcm_state(pcm)) {
+ 				case SND_PCM_STATE_XRUN:
+ 					return -EPIPE;
++#ifdef ESTRPIPE
+ 				case SND_PCM_STATE_SUSPENDED:
+ 					return -ESTRPIPE;
++#endif
+ 				case SND_PCM_STATE_DISCONNECTED:
+ 					return -ENODEV;
+ 				default:
+@@ -6542,8 +6550,10 @@ snd_pcm_sframes_t snd_pcm_read_areas(snd
+ 		break;
+ 	case SND_PCM_STATE_XRUN:
+ 		return -EPIPE;
++#ifdef ESTRPIPE
+ 	case SND_PCM_STATE_SUSPENDED:
+ 		return -ESTRPIPE;
++#endif
+ 	case SND_PCM_STATE_DISCONNECTED:
+ 		return -ENODEV;
+ 	default:
+@@ -6611,8 +6621,10 @@ snd_pcm_sframes_t snd_pcm_write_areas(sn
+ 		break;
+ 	case SND_PCM_STATE_XRUN:
+ 		return -EPIPE;
++#ifdef ESTRPIPE
+ 	case SND_PCM_STATE_SUSPENDED:
+ 		return -ESTRPIPE;
++#endif
+ 	case SND_PCM_STATE_DISCONNECTED:
+ 		return -ENODEV;
+ 	default:
+@@ -7237,6 +7249,7 @@ int snd_pcm_recover(snd_pcm_t *pcm, int 
+                 }
+                 return 0;
+         }
++#ifdef ESTRPIPE
+         if (err == -ESTRPIPE) {
+                 while ((err = snd_pcm_resume(pcm)) == -EAGAIN)
+                         /* wait until suspend flag is released */
+@@ -7250,6 +7263,7 @@ int snd_pcm_recover(snd_pcm_t *pcm, int 
+                 }
+                 return 0;
+         }
++#endif
+         return err;
+ }
+ 
+--- origsrc/alsa-lib-1.0.19/src/pcm/pcm_direct.c	2009-01-19 05:17:18.000000000 -0600
++++ src/alsa-lib-1.0.19/src/pcm/pcm_direct.c	2009-03-08 21:44:31.234375000 -0500
+@@ -1273,7 +1273,7 @@ int snd_pcm_direct_set_timer_params(snd_
+ 		filter = (1<<SND_TIMER_EVENT_TICK) |
+ 			 dmix->timer_event_suspend |
+ 			 dmix->timer_event_resume;
+-		snd_timer_params_set_filter(params, filter);
++		INTERNAL(snd_timer_params_set_filter)(params, filter);
+ 	}
+ 	ret = snd_timer_params(dmix->timer, params);
+ 	if (ret < 0) {
+--- origsrc/alsa-lib-1.0.19/src/pcm/pcm_dmix.c	2009-01-19 05:17:18.000000000 -0600
++++ src/alsa-lib-1.0.19/src/pcm/pcm_dmix.c	2009-03-08 21:12:17.953125000 -0500
+@@ -790,8 +790,10 @@ static snd_pcm_sframes_t snd_pcm_dmix_mm
+ 	switch (snd_pcm_state(dmix->spcm)) {
+ 	case SND_PCM_STATE_XRUN:
+ 		return -EPIPE;
++#ifdef ESTRPIPE
+ 	case SND_PCM_STATE_SUSPENDED:
+ 		return -ESTRPIPE;
++#endif
+ 	default:
+ 		break;
+ 	}
+--- origsrc/alsa-lib-1.0.19/src/pcm/pcm_dshare.c	2009-01-19 05:17:18.000000000 -0600
++++ src/alsa-lib-1.0.19/src/pcm/pcm_dshare.c	2009-03-08 21:12:40.968750000 -0500
+@@ -490,8 +490,10 @@ static snd_pcm_sframes_t snd_pcm_dshare_
+ 	switch (snd_pcm_state(dshare->spcm)) {
+ 	case SND_PCM_STATE_XRUN:
+ 		return -EPIPE;
++#ifdef ESTRPIPE
+ 	case SND_PCM_STATE_SUSPENDED:
+ 		return -ESTRPIPE;
++#endif
+ 	default:
+ 		break;
+ 	}
+--- origsrc/alsa-lib-1.0.19/src/pcm/pcm_dsnoop.c	2009-01-19 05:17:18.000000000 -0600
++++ src/alsa-lib-1.0.19/src/pcm/pcm_dsnoop.c	2009-03-08 21:13:03.093750000 -0500
+@@ -391,8 +391,10 @@ static snd_pcm_sframes_t snd_pcm_dsnoop_
+ 	switch (snd_pcm_state(dsnoop->spcm)) {
+ 	case SND_PCM_STATE_XRUN:
+ 		return -EPIPE;
++#ifdef ESTRPIPE
+ 	case SND_PCM_STATE_SUSPENDED:
+ 		return -ESTRPIPE;
++#endif
+ 	default:
+ 		break;
+ 	}
+--- origsrc/alsa-lib-1.0.19/src/pcm/pcm_hw.c	2009-01-19 05:17:18.000000000 -0600
++++ src/alsa-lib-1.0.19/src/pcm/pcm_hw.c	2009-03-08 21:44:04.218750000 -0500
+@@ -228,10 +228,12 @@ static int snd_pcm_hw_async(snd_pcm_t *p
+ 		SYSMSG("F_GETFL failed");
+ 		return err;
+ 	}
++#ifdef O_ASYNC
+ 	if (sig >= 0)
+ 		flags |= O_ASYNC;
+ 	else
+ 		flags &= ~O_ASYNC;
++#endif
+ 	if (fcntl(fd, F_SETFL, flags) < 0) {
+ 		err = -errno;
+ 		SYSMSG("F_SETFL for O_ASYNC failed");
+@@ -244,11 +246,13 @@ static int snd_pcm_hw_async(snd_pcm_t *p
+ 		SYSMSG("F_SETSIG failed");
+ 		return err;
+ 	}
++#ifdef F_SETOWN
+ 	if (fcntl(fd, F_SETOWN, (long)pid) < 0) {
+ 		err = -errno;
+ 		SYSMSG("F_SETOWN failed");
+ 		return err;
+ 	}
++#endif
+ 	return 0;
+ }
+ 
+@@ -403,7 +407,7 @@ static int snd_pcm_hw_change_timer(snd_p
+ 		}
+ 		snd_timer_params_set_auto_start(params, 1);
+ 		snd_timer_params_set_ticks(params, 1);
+-		snd_timer_params_set_filter(params, (1<<SND_TIMER_EVENT_TICK) |
++		INTERNAL(snd_timer_params_set_filter)(params, (1<<SND_TIMER_EVENT_TICK) |
+ 					    suspend | resume);
+ 		err = snd_timer_params(hw->period_timer, params);
+ 		if (err < 0) {
+@@ -1159,8 +1163,10 @@ int snd_pcm_hw_open_fd(snd_pcm_t **pcmp,
+ 	mode = 0;
+ 	if (fmode & O_NONBLOCK)
+ 		mode |= SND_PCM_NONBLOCK;
++#ifdef O_ASYNC
+ 	if (fmode & O_ASYNC)
+ 		mode |= SND_PCM_ASYNC;
++#endif
+ 
+ #if 0
+ 	/*
+@@ -1311,8 +1317,10 @@ int snd_pcm_hw_open(snd_pcm_t **pcmp, co
+ 	fmode = O_RDWR;
+ 	if (mode & SND_PCM_NONBLOCK)
+ 		fmode |= O_NONBLOCK;
++#ifdef O_ASYNC
+ 	if (mode & SND_PCM_ASYNC)
+ 		fmode |= O_ASYNC;
++#endif
+ 	if (mode & SND_PCM_APPEND)
+ 		fmode |= O_APPEND;
+ 	fd = snd_open_device(filename, fmode);
+--- origsrc/alsa-lib-1.0.19/src/pcm/pcm_local.h	2009-01-19 05:17:18.000000000 -0600
++++ src/alsa-lib-1.0.19/src/pcm/pcm_local.h	2009-03-08 21:07:23.843750000 -0500
+@@ -400,8 +400,10 @@ static inline int snd_pcm_check_error(sn
+ 		switch (snd_pcm_state(pcm)) {
+ 		case SND_PCM_STATE_XRUN:
+ 			return -EPIPE;
++#ifdef ESTRPIPE
+ 		case SND_PCM_STATE_SUSPENDED:
+ 			return -ESTRPIPE;
++#endif
+ 		case SND_PCM_STATE_DISCONNECTED:
+ 			return -ENODEV;
+ 		default:
+--- origsrc/alsa-lib-1.0.19/src/pcm/pcm_mmap.c	2009-01-19 05:17:18.000000000 -0600
++++ src/alsa-lib-1.0.19/src/pcm/pcm_mmap.c	2009-03-08 21:11:33.937500000 -0500
+@@ -28,7 +28,7 @@
+ 
+ size_t page_size(void)
+ {
+-	long s = sysconf(_SC_PAGE_SIZE);
++	long s = sysconf(_SC_PAGESIZE);
+ 	assert(s > 0);
+ 	return s;
+ }
+--- origsrc/alsa-lib-1.0.19/src/pcm/pcm_rate.c	2009-01-19 05:17:18.000000000 -0600
++++ src/alsa-lib-1.0.19/src/pcm/pcm_rate.c	2009-03-08 21:43:08.812500000 -0500
+@@ -574,7 +574,7 @@ static inline snd_pcm_sframes_t snd_pcm_
+ 	if (diff == 0)
+ 		return frames;
+ 	if (diff > 0) {
+-		ndiff = snd_pcm_forward(rate->gen.slave, diff);
++		ndiff = INTERNAL(snd_pcm_forward)(rate->gen.slave, diff);
+ 	} else {
+ 		ndiff = snd_pcm_rewind(rate->gen.slave, diff);
+ 	}
+@@ -1272,7 +1272,11 @@ static int rate_open_func(snd_pcm_rate_t
+ 		char lib_name[128], *lib = NULL;
+ 		if (!is_builtin_plugin(type)) {
+ 			snprintf(lib_name, sizeof(lib_name),
++#ifdef __CYGWIN__
++				 "%s/cygasound_module_rate_%s.dll", ALSA_PLUGIN_DIR, type);
++#else
+ 				 "%s/libasound_module_rate_%s.so", ALSA_PLUGIN_DIR, type);
++#endif
+ 			lib = lib_name;
+ 		}
+ 		h = snd_dlopen(lib, RTLD_NOW);
+--- origsrc/alsa-lib-1.0.19/src/pcm/pcm_symbols_list.c	1969-12-31 18:00:00.000000000 -0600
++++ src/alsa-lib-1.0.19/src/pcm/pcm_symbols_list.c	2009-03-08 20:49:05.515625000 -0500
+@@ -0,0 +1,27 @@
++&_snd_module_pcm_copy,
++&_snd_module_pcm_linear,
++&_snd_module_pcm_route,
++&_snd_module_pcm_mulaw,
++&_snd_module_pcm_alaw,
++&_snd_module_pcm_adpcm,
++&_snd_module_pcm_rate,
++&_snd_module_pcm_plug,
++&_snd_module_pcm_multi,
++&_snd_module_pcm_shm,
++&_snd_module_pcm_file,
++&_snd_module_pcm_null,
++&_snd_module_pcm_empty,
++&_snd_module_pcm_share,
++&_snd_module_pcm_meter,
++&_snd_module_pcm_hooks,
++&_snd_module_pcm_lfloat,
++&_snd_module_pcm_ladspa,
++&_snd_module_pcm_dmix,
++&_snd_module_pcm_dshare,
++&_snd_module_pcm_dsnoop,
++&_snd_module_pcm_asym,
++&_snd_module_pcm_iec958,
++&_snd_module_pcm_softvol,
++&_snd_module_pcm_extplug,
++&_snd_module_pcm_ioplug,
++&_snd_module_pcm_mmap_emul,
+--- origsrc/alsa-lib-1.0.19/src/timer/timer_hw.c	2009-01-19 05:17:18.000000000 -0600
++++ src/alsa-lib-1.0.19/src/timer/timer_hw.c	2009-03-08 21:14:10.906250000 -0500
+@@ -82,24 +82,30 @@ static int snd_timer_hw_async(snd_timer_
+ 		SYSERR("F_GETFL failed");
+ 		return -errno;
+ 	}
++#ifdef O_ASYNC
+ 	if (sig >= 0)
+ 		flags |= O_ASYNC;
+ 	else
+ 		flags &= ~O_ASYNC;
++#endif
+ 	if (fcntl(fd, F_SETFL, flags) < 0) {
+ 		SYSERR("F_SETFL for O_ASYNC failed");
+ 		return -errno;
+ 	}
+ 	if (sig < 0)
+ 		return 0;
++#ifdef F_SETSIG
+ 	if (fcntl(fd, F_SETSIG, (long)sig) < 0) {
+ 		SYSERR("F_SETSIG failed");
+ 		return -errno;
+ 	}
++#endif
++#ifdef F_SETOWN
+ 	if (fcntl(fd, F_SETOWN, (long)pid) < 0) {
+ 		SYSERR("F_SETOWN failed");
+ 		return -errno;
+ 	}
++#endif
+ 	return 0;
+ }
+ 
